@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from sqlalchemy import text
@@ -12,9 +13,13 @@ from app.routes.officer import router as officer_router
 from app.routes.clearance_upload import router as clearance_upload_router
 from app.routes.admin import router as admin_router
 from app.routes.departments import router as departments_router 
-
-Base.metadata.create_all(bind=engine)
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code
+    Base.metadata.create_all(bind=engine)
+    yield
+    # Shutdown code
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(auth_router)
 app.include_router(students_router)
