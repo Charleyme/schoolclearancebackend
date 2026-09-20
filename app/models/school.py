@@ -1,0 +1,15 @@
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, DateTime
+from app.database import Base
+from datetime import  datetime, timezone
+class School(Base):
+    __tablename__ = "schools"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique= True, nullable=False)
+    code = Column(String(20), unique= True, nullable= False)
+    is_active = Column(Boolean, default= True, nullable= False)
+   
+    created_at = Column(
+        DateTime, 
+        default= lambda: datetime.now(timezone.utc)
+    )
+ 
