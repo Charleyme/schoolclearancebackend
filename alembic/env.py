@@ -2,6 +2,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+import os
 
 from alembic import context
 from app.models import user, department, student, school, clearance_units, clearance_record, clearance_request, officer_assignment, clearance_requirement,clearance_document, clearance_payment
@@ -40,7 +41,9 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        url = "postgresql://postgres@localhost:5432/digital_clearance"
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
 
@@ -63,7 +66,9 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        url = "postgresql://postgres@localhost:5432/digital_clearance"
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
     
