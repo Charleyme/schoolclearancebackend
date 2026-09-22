@@ -112,6 +112,12 @@ def get_school_fee_summary(
             else:
                 payment_status = "not_paid"
 
+        rejection_remark = None
+        for payment in payments:
+            if payment.verification_status == "rejected":
+                rejection_remark = payment.verification_remark
+                break
+
         result.append({
             "requirement_id": requirement.id,
             "requirement_name": requirement.name,
@@ -121,7 +127,8 @@ def get_school_fee_summary(
             "rejected_amount": rejected_amount,
             "balance": balance,
             "receipt_count": len(payments),
-            "status": payment_status
+            "status": payment_status,
+            "rejection_remark": rejection_remark
         })
 
     return result

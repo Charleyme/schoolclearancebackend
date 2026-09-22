@@ -36,11 +36,3 @@ def home():
         "message":"Digital Clearance System"
     }
 
-@app.get("/test-db")
-def test_database():
-    with engine.connect() as connection:
-        result = connection.execute(text("SELECT 1"))
-    return{
-        "message": "connection successful",
-        "result": result.scalar()
-    }

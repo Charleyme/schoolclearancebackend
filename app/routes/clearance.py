@@ -9,10 +9,10 @@ from app.models.user import User
 from app.schemas.student import StudentCreate, StudentResponse
 from app.schemas.clearance import ClearanceResponse, ClearanceProgressResponse
 from app.services.clearance import clearance_application, get_clearance_info, get_my_documents, get_clearance_record
-from app.services.student import create_student_profile, get_student_profile
 from app.auth.dependencies import require_roles, get_current_user
 from app.schemas.payment_summary import PaymentSummaryResponse
 from app.services.payment_summary_service import get_school_fee_summary
+from app.services.officerchecking import apply_again_for_clearance
 
 
 router = APIRouter(
@@ -36,3 +36,6 @@ def get_documents(db: Session = Depends(get_db), current_user: User = Depends(re
 def payment_summary(clearance_record_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
     return get_school_fee_summary(db, current_user, clearance_record_id)
 
+@router.post("/record/{record_id}/apply-again")
+def apply_again(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+    return apply_again_for_clearance(db, record_id, current_user)

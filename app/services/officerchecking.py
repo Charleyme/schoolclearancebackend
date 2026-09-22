@@ -16,6 +16,9 @@ from app.schemas.document_verification import DocumentVerificationRequest
 from app.schemas.payment_verification import PaymentVerificationRequest
 from app.services.clearance import update_clearance_unit_status, update_overall_clearance_status
 from app.models.clearance_payment import ClearancePayment
+from fastapi.responses import FileResponse
+from pathlib import Path
+from decimal import Decimal
 
 def update_clearance_status(db: Session, clearance_request_id: int):
     clearance_request = db.query(ClearanceRequest).filter(ClearanceRequest.id == clearance_request_id).first()
@@ -74,7 +77,7 @@ def get_pending_clearances(db:Session, current_user: User):
     )
 
     # Officers only see their assigned units
-    if current_user == "officer":
+    if current_user.role == "officer":
 
         assignments = (
             db.query(OfficerAssignment)
@@ -195,14 +198,113 @@ def approve_clearance(
             status_code=403,
             detail="You are not assigned to this student's school"
         )
-    # Department Clearance rule
-    if record.clearance_unit_id == 1 and decision.status == "approved":
-        if decision.amount_owed is not None and decision.amount_owed > 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Student has an outstanding miscellaneous fee of ₦{decision.amount_owed}"
+
+    # Check required documents before approving clearance
+    if decision.status == "approved":
+
+        requirements = (
+            db.query(ClearanceRequirement)
+            .filter(
+                ClearanceRequirement.clearance_unit_id == record.clearance_unit_id,
+                ClearanceRequirement.is_required == True,
+                ClearanceRequirement.is_active == True
             )
+            .all()
+        )
+
+        for requirement in requirements:
+
+            if requirement.requirement_type == "document":
+
+                approved_document = (
+                    db.query(ClearanceDocument)
+                    .filter(
+                        ClearanceDocument.clearance_record_id == record.id,
+                        ClearanceDocument.requirement_id == requirement.id,
+                        ClearanceDocument.verification_status == "approved"
+                    )
+                    .first()
+                )
+
+                if not approved_document:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Clearance cannot be approved. "
+                            f"The required document '{requirement.name}' "
+                            f"has not been approved."
+                        )
+                    )
+        if record.clearance_unit_id == 8:
+
+            for requirement in requirements:
+
+                if requirement.requirement_type == "payment":
+
+                   payments = (
+                      db.query(ClearancePayment)
+                      .filter(
+                        ClearancePayment.clearance_record_id == record.id,
+                        ClearancePayment.requirement_id == requirement.id
+                       )
+                      .all()
+                )
+
+                if not payments:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Clearance cannot be approved. "
+                            f"No payment has been submitted for "
+                            f"'{requirement.name}'."
+                        )
+                    )
+
+                approved_amount = sum(
+                    (
+                        payment.amount
+                        for payment in payments
+                        if payment.verification_status == "approved"
+                    ),
+                    Decimal("0")
+                )
+
+                if requirement.expected_amount is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Expected amount has not been configured for "
+                            f"'{requirement.name}'."
+                        )
+                    )
+
+                if approved_amount < requirement.expected_amount:
+                    balance = requirement.expected_amount - approved_amount
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Clearance cannot be approved. "
+                            f"'{requirement.name}' is not fully paid. "
+                            f"Approved amount: ₦{approved_amount:,.2f}. "
+                            f"Expected amount: ₦{requirement.expected_amount:,.2f}. "
+                            f"Balance: ₦{balance:,.2f}."
+                        )
+                    )
+
+        # Department-specific miscellaneous fee check
+        if record.clearance_unit_id == 1:
+
+            if decision.amount_owed is not None and decision.amount_owed > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Student has an outstanding miscellaneous fee "
+                        f"of ₦{decision.amount_owed}"
+                    )
+                )
     
+        
     # Update clearance record
     record.status = decision.status
     record.amount_owed = decision.amount_owed
@@ -386,8 +488,6 @@ def verify_document(document_id: int, data: DocumentVerificationRequest, db: Ses
 
     document.verified_by = current_user.id
     document.verified_at = datetime.now(timezone.utc)
-    update_clearance_unit_status(db, clearance_record = document.clearance_record)
-    update_overall_clearance_status(db, clearance_record = document.clearance_record)
 
 
     db.commit()
@@ -569,3 +669,244 @@ def get_officer_payments(
         })
 
     return result
+
+
+def get_officer_documents(
+    db: Session,
+    current_user: User
+):
+    assignments = (
+        db.query(OfficerAssignment)
+        .filter(
+            OfficerAssignment.user_id == current_user.id
+        )
+        .all()
+    )
+
+    if not assignments:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not assigned to any clearance unit."
+        )
+
+    unit_ids = [
+        assignment.clearance_unit_id
+        for assignment in assignments
+    ]
+
+    documents = (
+        db.query(ClearanceDocument)
+        .join(
+            ClearanceRecord,
+            ClearanceDocument.clearance_record_id
+            == ClearanceRecord.id
+        )
+        .filter(
+            ClearanceRecord.clearance_unit_id.in_(unit_ids),
+            ClearanceDocument.verification_status == "pending"
+        )
+        .all()
+    )
+
+    result = []
+
+    for document in documents:
+        record = document.clearance_record
+        request = record.clearance_request
+        student = request.student
+        requirement = document.requirement
+
+        result.append({
+            "document_id": document.id,
+            "clearance_record_id": record.id,
+            "student_name": student.full_name,
+            "matric_number": student.matric_number,
+            "requirement_id": requirement.id,
+            "requirement_name": requirement.name,
+            "file_name": document.file_name,
+            "verification_status": document.verification_status,
+            "uploaded_at": document.uploaded_at
+        })
+
+    return result
+
+
+
+def view_payment_receipt(
+    payment_id: int,
+    db: Session,
+    current_user: User
+):
+    # Find payment
+    payment = (
+        db.query(ClearancePayment)
+        .filter(ClearancePayment.id == payment_id)
+        .first()
+    )
+
+    if not payment:
+        raise HTTPException(
+            status_code=404,
+            detail="Payment not found."
+        )
+
+    # Get the clearance record
+    record = payment.clearance_record
+
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="Clearance record not found."
+        )
+
+    # Check officer assignment
+    assignment = (
+        db.query(OfficerAssignment)
+        .filter(
+            OfficerAssignment.user_id == current_user.id,
+            OfficerAssignment.clearance_unit_id == record.clearance_unit_id
+        )
+        .first()
+    )
+
+    if not assignment:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not assigned to this clearance unit."
+        )
+
+    # Get stored file path
+    file_path = Path(payment.receipt_file_path)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Receipt file not found."
+        )
+
+    return FileResponse(
+        path=file_path,
+        filename=payment.receipt_file_name
+    )
+
+def view_document_file(
+    document_id: int,
+    db: Session,
+    current_user: User 
+):
+    document = (
+        db.query(ClearanceDocument)
+        .filter(ClearanceDocument.id == document_id)
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found."
+        )
+
+    record = document.clearance_record
+
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="Clearance record not found."
+        )
+
+    # Check officer assignment
+    assignment = (
+        db.query(OfficerAssignment)
+        .filter(
+            OfficerAssignment.user_id == current_user.id,
+            OfficerAssignment.clearance_unit_id == record.clearance_unit_id
+        )
+        .first()
+    )
+
+    if not assignment:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not assigned to this clearance unit."
+        )
+
+    file_path = Path(document.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Document file not found."
+        )
+
+    return FileResponse(
+        path=file_path,
+        filename=document.file_name
+    )
+
+def apply_again_for_clearance(
+    db: Session,
+    record_id: int,
+    current_user: User
+):
+    record = (
+        db.query(ClearanceRecord)
+        .filter(ClearanceRecord.id == record_id)
+        .first()
+    )
+
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="Clearance record not found"
+        )
+
+    # Get the student's profile
+    student = (
+        db.query(Student)
+        .filter(Student.user_id == current_user.id)
+        .first()
+    )
+
+    if not student:
+        raise HTTPException(
+            status_code=404,
+            detail="Student profile not found"
+        )
+
+    # Make sure this clearance belongs to the student
+    if record.clearance_request.student_id != student.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to apply for this clearance"
+        )
+
+    # Only rejected clearance records can be applied for again
+    if record.status != "rejected":
+        raise HTTPException(
+            status_code=400,
+            detail="Only rejected clearance records can be applied for again"
+        )
+
+    # Reset the clearance record
+
+    record.status = "pending"
+    record.amount_owed = None
+    record.remark = None
+    record.approved_by = None
+    record.approved_at = None
+    record.clearance_request.submitted_at = datetime.now(timezone.utc)
+
+    # Recalculate overall clearance status
+    update_clearance_status(
+        db,
+        record.clearance_request_id
+    )
+
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "message": "Clearance application submitted again successfully",
+        "record_id": record.id,
+        "status": record.status
+    }

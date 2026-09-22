@@ -12,3 +12,4 @@ class PaymentSummaryResponse(BaseModel):
     balance: Decimal | None
     receipt_count: int
     status: str
+    rejection_remark: str | None = None

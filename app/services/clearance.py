@@ -12,6 +12,7 @@ from app.models.clearance_document import ClearanceDocument
 from decimal import Decimal
 from app.models.clearance_payment import ClearancePayment
 
+
 def clearance_application(db: Session, current_user: User):
     student = db.query(Student).filter(Student.user_id == current_user.id).first()
     if not student:
@@ -404,3 +405,4 @@ def update_overall_clearance_status(db: Session, clearance_request):
 
     else:
         clearance_request.status = "pending"
+

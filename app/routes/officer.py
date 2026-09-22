@@ -11,7 +11,7 @@ from app.schemas.officer import ClearanceDecision
 from app.schemas.document_verification import DocumentVerificationRequest
 from app.schemas.payment_verification import PaymentVerificationRequest
 from app.auth.dependencies import require_roles
-from app.services.officerchecking import get_pending_clearances, approve_clearance, get_clearance_record, get_document_for_review, verify_document, verify_payment, get_officer_payments
+from app.services.officerchecking import get_pending_clearances, approve_clearance, get_clearance_record, get_document_for_review, verify_document, verify_payment, get_officer_payments, view_payment_receipt, view_document_file, get_officer_documents
 
 
 router = APIRouter(
@@ -42,3 +42,16 @@ def verify_student_payment(payment_id: int, data: PaymentVerificationRequest, db
 @router.get("/payments")
 def get_student_payments(db: Session = Depends(get_db), current_user: User = Depends(require_roles("officer", "admin"))):
     return get_officer_payments(db, current_user)
+
+@router.get("/documents")
+def get_documents_for_review(db: Session = Depends(get_db), current_user: User = Depends(require_roles("officer", "admin"))):
+    return get_officer_documents(db, current_user)
+
+
+
+@router.get("/payments/{payment_id}/receipt")
+def get_payment_receipt(payment_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles("officer", "admin"))):
+    return view_payment_receipt(payment_id, db, current_user)
+@router.get("/documents/{document_id}/file")
+def get_document_file(document_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles("officer", "admin"))):
+    return view_document_file(document_id, db, current_user)
