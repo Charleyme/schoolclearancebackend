@@ -2,6 +2,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.user import User
+from app.models.school import School
 
 from app.models.clearance_units import ClearanceUnit
 
@@ -50,16 +51,54 @@ def assign_officer(
             detail="Clearance unit not found."
         )
 
+    # School is required for School Clearance
+    if data.clearance_unit_id == 2:
+
+        if data.school_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="School is required for School Clearance assignment."
+            )
+
+        school = (
+            db.query(School)
+            .filter(
+                School.id == data.school_id,
+                School.is_active == True
+            )
+            .first()
+        )
+
+        if not school:
+            raise HTTPException(
+                status_code=404,
+                detail="School not found."
+            )
+
+    else:
+        # Other clearance units should not have a school
+        data.school_id = None
+
     # Check for existing assignment
-    existing_assignment = (
+    assignment_query = (
         db.query(OfficerAssignment)
         .filter(
             OfficerAssignment.user_id == data.user_id,
-            OfficerAssignment.clearance_unit_id
-            == data.clearance_unit_id
+            OfficerAssignment.clearance_unit_id == data.clearance_unit_id
         )
-        .first()
     )
+
+    if data.school_id is None:
+        assignment_query = assignment_query.filter(
+            OfficerAssignment.school_id.is_(None)
+        )
+    else:
+        assignment_query = assignment_query.filter(
+            OfficerAssignment.school_id == data.school_id
+        )
+
+    existing_assignment = assignment_query.first()
+
 
     if existing_assignment:
         raise HTTPException(
@@ -70,7 +109,8 @@ def assign_officer(
     # Create assignment
     assignment = OfficerAssignment(
         user_id=data.user_id,
-        clearance_unit_id=data.clearance_unit_id
+        clearance_unit_id=data.clearance_unit_id,
+        school_id=data.school_id
     )
 
     db.add(assignment)
